@@ -7,7 +7,7 @@ use crate::{
 use crypto::hash::{ChainId, ProtocolHash};
 use num::BigInt;
 use serde::{Deserialize, Serialize};
-use storage::BlockStorageReader;
+use storage::{BlockStorageReader, BlockJsonData, BlockHeaderWithHash};
 use storage::{
     cycle_eras_storage::CycleEra, BlockMetaStorage, BlockMetaStorageReader, BlockStorage,
     CycleErasStorage,
@@ -57,7 +57,7 @@ impl From<CycleRewardsInt> for CycleRewards {
 pub enum BalanceUpdateKind {
     Contract(ContractKind),
     Accumulator(AccumulatorKind),
-    Freezer,
+    Freezer(FreezerKind),
     Minted(MintedKind),
     Burned,
     Commitment,
@@ -89,6 +89,14 @@ pub struct ContractKind {
     contract: String,
     change: String,
     origin: BalanceUpdateOrigin,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct FreezerKind {
+    delegate: String,
+    change: String,
+    origin: BalanceUpdateOrigin,
+    category: BalanceUpdateCategory,
 }
 
 // TODO: include legacy stuff?
@@ -153,6 +161,7 @@ pub(crate) async fn get_cycle_rewards(
     cycle_num: i32,
 ) -> Result<DelegateCycleRewards, anyhow::Error> {
     let block_meta_storage = BlockMetaStorage::new(env.persistent_storage());
+    let block_storage = BlockStorage::new(env.persistent_storage());
     let (current_head_level, current_head_hash) = if let Ok(shared_state) = env.state().read() {
         (
             shared_state.current_head().header.level(),
@@ -186,10 +195,19 @@ pub(crate) async fn get_cycle_rewards(
             let (start, end) = cycle_range(&cycle_era, cycle_num);
 
             // let start_hash = parse_block_hash_or_fail!(&chain_id, &start.to_string(), &env);
-            let start_hash = parse_block_hash(chain_id, &start.to_string(), env)?;
+            // let start_hash = parse_block_hash(chain_id, &end.to_string(), env)?;
 
-            let blocks = BlockStorage::new(env.persistent_storage())
-                .get_multiple_with_json_data(&start_hash, *cycle_era.blocks_per_cycle() as usize)?;
+            let mut blocks: Vec<(BlockHeaderWithHash, BlockJsonData)> = Vec::with_capacity(*cycle_era.blocks_per_cycle() as usize);
+
+            for level in start..=end {
+                let hash = parse_block_hash(chain_id, &level.to_string(), env)?;
+                if let Some(block_with_json_data) = block_storage.get_with_json_data(&hash)? {
+                    blocks.push(block_with_json_data)
+                }
+            }
+
+            // let blocks = BlockStorage::new(env.persistent_storage())
+            //     .get_multiple_with_json_data(&start_hash, *cycle_era.blocks_per_cycle() as usize)?;
 
             let mut connection = env.tezos_protocol_api().readable_connection().await?;
             for (block_header, block_json_data) in blocks {
@@ -214,13 +232,7 @@ pub(crate) async fn get_cycle_rewards(
 
                     let metadata: BlockMetadata =
                         serde_json::from_str(&response).unwrap_or_default();
-                    // let cycle_position = if let Some(level) = metadata.get("level") {
-                    //     level["cycle_position"].as_i64()
-                    // } else if let Some(level) = metadata.get("level_info") {
-                    //     level["cycle_position"].as_i64()
-                    // } else {
-                    //     None
-                    // };
+
                     if let Some(balance_updates) = metadata.get("balance_updates") {
                         if let Some(balance_updates_array) = balance_updates.as_array() {
                             // balance_updates_array.iter().map(|val| serde_json::from_value(val.clone()).unwrap_or_default()).collect()
@@ -229,13 +241,43 @@ pub(crate) async fn get_cycle_rewards(
                                 let balance_update: BalanceUpdateKind =
                                     serde_json::from_value(balance_update.clone())
                                         .unwrap_or_default();
-                                if let BalanceUpdateKind::Contract(contract_updates) =
-                                    balance_update
-                                {
-                                    result
-                                        .entry(contract_updates.contract)
-                                        .or_insert_with(CycleRewardsInt::default)
-                                        .sum += BigInt::from_str(&contract_updates.change)?;
+                                // if let BalanceUpdateKind::Contract(contract_updates) =
+                                //     balance_update
+                                // {
+                                    
+                                // }
+                                match balance_update {
+                                    BalanceUpdateKind::Contract(contract_updates) => {
+                                        result
+                                            .entry(contract_updates.contract.clone())
+                                            .or_insert_with(CycleRewardsInt::default)
+                                            .sum += BigInt::from_str(&contract_updates.change)?;
+                                    
+                                        // DEBUG
+                                        if contract_updates.contract == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+                                            slog::crit!(env.log(), "Level {} - Block hash {}: {:#?}", block_header.hash, block_header.header.level(), contract_updates)
+                                        }
+                                    }
+                                    // The contract balance_update subtracts the deposit, we just add back the deposited amount
+                                    BalanceUpdateKind::Freezer(freezer_update) => {
+                                        if let BalanceUpdateCategory::Deposits = freezer_update.category {
+                                            result
+                                                .entry(freezer_update.delegate.clone())
+                                                .or_insert_with(CycleRewardsInt::default)
+                                                .sum += BigInt::from_str(&freezer_update.change)?;
+                                            // DEBUG
+                                            if freezer_update.delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+                                                slog::crit!(env.log(), "Deposit at level {}: {:#?}", block_header.header.level(), freezer_update)
+                                            }
+                                        }
+                                    }
+                                    // DEBUG
+                                    BalanceUpdateKind::Minted(minted_update) => {
+                                        if let BalanceUpdateCategory::NonceRevelationRewards = minted_update.category {
+                                            slog::crit!(env.log(), "Minted Nonce reward at level {}: {:#?}", block_header.header.level(), minted_update)
+                                        }
+                                    }
+                                    _ => { /* Ignore other receipts */ }
                                 }
                             }
                         } else {
@@ -244,13 +286,6 @@ pub(crate) async fn get_cycle_rewards(
                     } else {
                         anyhow::bail!("Balance updates not found");
                     };
-
-                    // result.push(SlimBlockData {
-                    //     level: block_header.header.level(),
-                    //     block_hash: block_header.hash.to_base58_check(),
-                    //     timestamp: block_header.header.timestamp().to_string(),
-                    //     cycle_position,
-                    // });
                 }
             }
         }
