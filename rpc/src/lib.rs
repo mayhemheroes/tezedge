@@ -25,6 +25,7 @@ pub(crate) fn options() -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(
             hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS, PUT",
@@ -40,6 +41,7 @@ pub fn make_json_response<T: serde::Serialize>(content: &T) -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(
             hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS, PUT",
@@ -54,6 +56,7 @@ pub fn make_raw_response(raw: &'static [u8]) -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(
             hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS, PUT",
@@ -69,6 +72,7 @@ pub fn make_response_with_status_and_json_string(status_code: u16, body: &str) -
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(
             hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS, PUT",
@@ -88,6 +92,7 @@ pub(crate) fn make_json_stream_response<
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(
             hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS, PUT",
@@ -150,6 +155,7 @@ pub(crate) fn empty() -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .body(Body::empty())?)
 }
 
@@ -161,6 +167,7 @@ pub(crate) fn not_found() -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .body(Body::empty())?)
 }
 
@@ -187,6 +194,7 @@ pub(crate) fn error_with_message(error_msg: String) -> ServiceResult {
         .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type")
         .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+        .header(hyper::header::ACCESS_CONTROL_ALLOW_HEADERS, "x-requested-with")
         .header(hyper::header::TRANSFER_ENCODING, "chunked")
         .body(Body::from(error_msg))?)
 }
