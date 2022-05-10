@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Error;
 use crypto::hash::{ChainId, ProtocolHash, BlockHash};
-use num::{BigInt, bigint::Sign, Signed};
+use num::{BigInt, bigint::Sign, Signed, BigRational};
 use serde::{Deserialize, Serialize};
 use storage::{BlockStorageReader, BlockJsonData, BlockHeaderWithHash};
 use storage::{
@@ -203,14 +203,19 @@ impl TryFrom<DelegateInfo> for DelegateInfoInt {
 
 // TODO: should we use the concrete PublicKeyHash type?
 pub type Delegate = String;
+pub type Delegator = String;
 pub type DelegateCycleRewards = BTreeMap<Delegate, CycleRewards>;
+
+// To serialize bigint we use its string form
+pub type DelegateRewardDistribution = BTreeMap<Delegator, String>;
+pub type CycleRewardDistribution = BTreeMap<Delegate, DelegateRewardDistribution>;
 
 // TODO: create proper errors
 pub(crate) async fn get_cycle_rewards(
     chain_id: &ChainId,
     env: &RpcServiceEnvironment,
     cycle_num: i32,
-) -> Result<DelegateCycleRewards, anyhow::Error> {
+) -> Result<CycleRewardDistribution, anyhow::Error> {
     // TODO: get from constants
     const PRESERVED_CYCLES: i32 = 3;
 
@@ -362,7 +367,9 @@ pub(crate) async fn get_cycle_rewards(
 
             // we need to get all the delegators for a specific delegate
             let mut delegate_info_map: BTreeMap<Delegate, DelegateInfoInt> = BTreeMap::new();
-            for delegate in result.keys() {
+            let mut delegates_reward_distribution: CycleRewardDistribution = BTreeMap::new();
+            for (delegate, cycle_rewards) in result.iter() {
+                let mut reward_distributon = DelegateRewardDistribution::new();
                 let delegate_info_string = get_routed_request(
                     &format!("chains/main/blocks/{frozen_snapshot_block}/context/delegates/{delegate}"),
                     // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
@@ -389,6 +396,11 @@ pub(crate) async fn get_cycle_rewards(
                     ).await?;
                     // slog::crit!(env.log(), "DELEGATOR BALANCE RAW: {:#?}", delegator_balance.trim_end_matches('\n').trim_matches('\"'));
                     let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
+                    
+                    let delegator_reward_share = get_delegator_reward_share(delegate_info.staking_balance.clone(), cycle_rewards.sum.clone(), delegator_balance.clone());
+
+                    reward_distributon.insert(delegator.clone(), delegator_reward_share.to_string());
+
                     delegator_balance_sum += delegator_balance.clone();
                     delegate_info.delegator_balances.insert(delegator, delegator_balance);
                 }
@@ -405,23 +417,24 @@ pub(crate) async fn get_cycle_rewards(
                 // if delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
                 //     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
                 // }
-
                 delegate_info_map.insert(delegate.to_string(), delegate_info);
+                delegates_reward_distribution.insert(delegate.to_string(), reward_distributon);
                 // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
             }
+            Ok(delegates_reward_distribution)
         }
         _ => {
-            return Err(UnsupportedProtocolError {
+            Err(UnsupportedProtocolError {
                 protocol: protocol_hash.to_string(),
             }
             .into())
         }
     }
 
-    Ok(result
-        .into_iter()
-        .map(|(delegate, rewards)| (delegate, rewards.into()))
-        .collect())
+    // Ok(result
+    //     .into_iter()
+    //     .map(|(delegate, rewards)| (delegate, rewards.into()))
+    //     .collect())
 }
 
 fn get_cycle_era(protocol_hash: &ProtocolHash, cycle_num: i32, env: &RpcServiceEnvironment) -> Result<CycleEra, anyhow::Error> {
@@ -471,4 +484,13 @@ async fn get_routed_request(path: &str, block_hash: BlockHash, env: &RpcServiceE
     let res = protocol::call_protocol_rpc(MAIN_CHAIN_ID, chain_id, block_hash, req, &env).await?;
 
     Ok(res.1.clone())
+}
+
+// TODO: comisson
+fn get_delegator_reward_share(staking_balance: BigInt, delegate_total_reward: BigInt, delegator_balance: BigInt) -> BigInt {
+    let share = BigRational::new(delegator_balance, staking_balance);
+
+    let reward = BigRational::from(delegate_total_reward) * share;
+
+    reward.round().to_integer()
 }
