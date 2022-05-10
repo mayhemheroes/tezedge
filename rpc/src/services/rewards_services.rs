@@ -245,9 +245,10 @@ pub(crate) async fn get_cycle_rewards(
             let cycle_era = get_cycle_era(&saved_cycle_era_in_proto_hash, cycle_num, env)?;
 
             let (start, end) = cycle_range(&cycle_era, cycle_num);
+            slog::crit!(env.log(), "CYCLE: {cycle_num} ({start} - {end})");
 
             // let start_hash = parse_block_hash_or_fail!(&chain_id, &start.to_string(), &env);
-            // let end_hash = parse_block_hash(chain_id, &end.to_string(), env)?;
+            let end_hash = parse_block_hash(chain_id, &end.to_string(), env)?;
 
             let mut blocks: Vec<(BlockHeaderWithHash, BlockJsonData)> = Vec::with_capacity(*cycle_era.blocks_per_cycle() as usize);
 
@@ -350,9 +351,9 @@ pub(crate) async fn get_cycle_rewards(
             let frozen_end_hash = parse_block_hash(chain_id, &frozen_end.to_string(), env)?;
 
             let frozen_cycle_snapshot = get_routed_request(
-                &format!("chains/main/blocks/{frozen_end}/context/selected_snapshot?cycle={frozen_cycle}"),
+                &format!("chains/main/blocks/{end}/context/selected_snapshot?cycle={cycle_num}"),
                 // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                frozen_end_hash.clone(),
+                end_hash.clone(),
                 env
             ).await?;
 
