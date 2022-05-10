@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr};
 
 use crate::{
-    helpers::{parse_block_hash, BlockMetadata, RpcServiceError, MAIN_CHAIN_ID, parse_chain_id},
+    helpers::{parse_block_hash, BlockMetadata, RpcServiceError, MAIN_CHAIN_ID, parse_chain_id, BlockOperations},
     parse_block_hash_or_fail, RpcServiceEnvironment,
 };
 use anyhow::Error;
@@ -13,7 +13,7 @@ use storage::{
     cycle_eras_storage::CycleEra, BlockMetaStorage, BlockMetaStorageReader, BlockStorage,
     CycleErasStorage,
 };
-use tezos_api::ffi::{RpcRequest, RpcMethod};
+use tezos_api::ffi::{RpcRequest, RpcMethod, ApplyBlockRequest};
 use tezos_messages::{protocol::{SupportedProtocol, UnsupportedProtocolError}, p2p::encoding::operations_for_blocks::OperationsForBlocksMessage};
 
 use super::{base_services::get_additional_data_or_fail, protocol};
@@ -201,6 +201,37 @@ impl TryFrom<DelegateInfo> for DelegateInfoInt {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OperationKind {
+    SeedNonceRevelation,
+    DoubleBakingEvidence,
+    DoublePreendorsementEvidence,
+    DoubleEndorsementEvidence,
+    ActivateAccount,
+    Ballot,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OperationMetadata {
+    balance_updates: Vec<BalanceUpdateKind>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct BareOperationKind {
+    kind: OperationKind,
+    metadata: OperationMetadata,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OperationRepresentation {
+    protocol: String,
+    chain_id: String,
+    hash: String,
+    branch: String,
+    contents: Vec<BareOperationKind>,
+}
+
 // TODO: should we use the concrete PublicKeyHash type?
 pub type Delegate = String;
 pub type Delegator = String;
@@ -272,8 +303,8 @@ pub(crate) async fn get_cycle_rewards(
                         block_header.header.context().clone(),
                         block_json_data.block_header_proto_metadata_bytes,
                         block_additional_data.max_operations_ttl().into(),
-                        block_additional_data.protocol_hash,
-                        block_additional_data.next_protocol_hash,
+                        block_additional_data.protocol_hash.clone(),
+                        block_additional_data.next_protocol_hash.clone(),
                     )
                     .await;
 
@@ -285,6 +316,24 @@ pub(crate) async fn get_cycle_rewards(
 
                 let metadata: BlockMetadata =
                     serde_json::from_str(&response).unwrap_or_default();
+
+                let response = connection
+                    .apply_block_operations_metadata(
+                        chain_id.clone(),
+                        ApplyBlockRequest::convert_operations(operations_data),
+                        block_json_data.operations_proto_metadata_bytes,
+                        block_additional_data.protocol_hash.clone(),
+                        block_additional_data.next_protocol_hash.clone(),
+                    )
+                    .await;
+
+                let response = if let Ok(response) = response {
+                    response
+                } else {
+                    continue;
+                };
+
+                let block_operations: BlockOperations = serde_json::from_str(&response).unwrap_or_default();
 
                 if let Some(balance_updates) = metadata.get("balance_updates") {
                     if let Some(balance_updates_array) = balance_updates.as_array() {
@@ -339,7 +388,39 @@ pub(crate) async fn get_cycle_rewards(
                 } else {
                     anyhow::bail!("Balance updates not found");
                 };
+
+                // for val_pass in block_operations {
+                //     for op in val_pass {
+                //         slog::crit!(env.log(), "Ops: {:#?}", op.get());
+                //     }
+                // }
+
+                for operations in &block_operations[2] {
+                    let operation: OperationRepresentation = serde_json::from_str(operations.get())?;
+
+                    for content in operation.contents {
+                        match content.kind {
+                            OperationKind::DoubleBakingEvidence |
+                            OperationKind::DoubleEndorsementEvidence |
+                            OperationKind::DoublePreendorsementEvidence |
+                            OperationKind::SeedNonceRevelation => {
+                                for balance_update in content.metadata.balance_updates {
+                                    if let BalanceUpdateKind::Contract(contract_updates) = balance_update {
+                                        result
+                                            .entry(contract_updates.contract.clone())
+                                            .or_insert_with(CycleRewardsInt::default)
+                                            .sum += BigInt::from_str(&contract_updates.change)?;
+                                    }
+                                }
+                            }
+                            _ => { /* Ignore */ }
+                        }
+                    }
+
+                    // operations.as_array()
+                }
             }
+
             slog::crit!(env.log(), "REWARDS OK");
 
             // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES - 1
