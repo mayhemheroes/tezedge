@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Error;
 use crypto::hash::{ChainId, ProtocolHash, BlockHash};
-use num::BigInt;
+use num::{BigInt, bigint::Sign, Signed};
 use serde::{Deserialize, Serialize};
 use storage::{BlockStorageReader, BlockJsonData, BlockHeaderWithHash};
 use storage::{
@@ -242,7 +242,7 @@ pub(crate) async fn get_cycle_rewards(
             let (start, end) = cycle_range(&cycle_era, cycle_num);
 
             // let start_hash = parse_block_hash_or_fail!(&chain_id, &start.to_string(), &env);
-            // let start_hash = parse_block_hash(chain_id, &end.to_string(), env)?;
+            // let end_hash = parse_block_hash(chain_id, &end.to_string(), env)?;
 
             let mut blocks: Vec<(BlockHeaderWithHash, BlockJsonData)> = Vec::with_capacity(*cycle_era.blocks_per_cycle() as usize);
 
@@ -337,8 +337,8 @@ pub(crate) async fn get_cycle_rewards(
             }
             slog::crit!(env.log(), "REWARDS OK");
 
-            // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES
-            let frozen_cycle = cycle_num - PRESERVED_CYCLES;
+            // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES - 1
+            let frozen_cycle = cycle_num - PRESERVED_CYCLES - 1;
             let frozen_cycle_era = get_cycle_era(&saved_cycle_era_in_proto_hash, frozen_cycle, env)?;
             let (frozen_start, frozen_end) = cycle_range(&frozen_cycle_era, frozen_cycle);
 
@@ -356,6 +356,7 @@ pub(crate) async fn get_cycle_rewards(
             let frozen_cycle_snapshot = frozen_cycle_snapshot.trim_end_matches('\n').parse::<i32>()?;
 
             let frozen_snapshot_block = get_snapshot_block(frozen_start, frozen_cycle_snapshot);
+            let frozen_snapshot_block_hash = parse_block_hash(chain_id, &frozen_snapshot_block.to_string(), env)?;
 
             slog::crit!(env.log(), "FROZEN STUFF OK");
 
@@ -363,9 +364,9 @@ pub(crate) async fn get_cycle_rewards(
             let mut delegate_info_map: BTreeMap<Delegate, DelegateInfoInt> = BTreeMap::new();
             for delegate in result.keys() {
                 let delegate_info_string = get_routed_request(
-                    &format!("chains/main/blocks/{frozen_end}/context/delegates/{delegate}"),
+                    &format!("chains/main/blocks/{frozen_snapshot_block}/context/delegates/{delegate}"),
                     // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                    frozen_end_hash.clone(),
+                    frozen_snapshot_block_hash.clone(),
                     env
                 ).await?;
                 // Note: the list includes the delegate itself as well, we need to consider this later
@@ -374,7 +375,7 @@ pub(crate) async fn get_cycle_rewards(
                 slog::crit!(env.log(), "DELEGATE INFO OK");
 
                 let delegators = delegate_info.delegated_contracts.clone();
-
+                let mut delegator_balance_sum: BigInt = BigInt::new(Sign::Plus, vec![0]);
                 for delegator in delegators {
                     // ignore the delegate itseld as it is part of the list
                     if &delegator == delegate {
@@ -383,20 +384,27 @@ pub(crate) async fn get_cycle_rewards(
                     let delegator_balance = get_routed_request(
                         &format!("chains/main/blocks/{frozen_snapshot_block}/context/raw/json/contracts/index/{delegator}/balance"),
                         // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                        current_head_hash.clone(),
+                        frozen_snapshot_block_hash.clone(),
                         env
                     ).await?;
                     // slog::crit!(env.log(), "DELEGATOR BALANCE RAW: {:#?}", delegator_balance.trim_end_matches('\n').trim_matches('\"'));
-                    let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>()?;
+                    let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
+                    delegator_balance_sum += delegator_balance.clone();
                     delegate_info.delegator_balances.insert(delegator, delegator_balance);
                 }
 
-                slog::crit!(env.log(), "DELEGATOR BALANCES OK");
-
-                // DEBUG
-                if delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+                if delegate_info.delegated_balance == delegator_balance_sum {
+                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK", delegate);
+                } else {
+                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES is off", delegate);
+                    slog::crit!(env.log(), "Actual: {} - Summed: {} - Diff: {}", delegate_info.delegated_balance.clone(), delegator_balance_sum.clone(), (delegator_balance_sum - delegate_info.delegated_balance.clone()).abs());
                     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
                 }
+
+                // DEBUG
+                // if delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+                //     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
+                // }
 
                 delegate_info_map.insert(delegate.to_string(), delegate_info);
                 // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
