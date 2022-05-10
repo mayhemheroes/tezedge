@@ -15,6 +15,7 @@ use storage::{
 };
 use tezos_api::ffi::{RpcRequest, RpcMethod, ApplyBlockRequest};
 use tezos_messages::{protocol::{SupportedProtocol, UnsupportedProtocolError}, p2p::encoding::operations_for_blocks::OperationsForBlocksMessage};
+use time::{Instant, Duration};
 
 use super::{base_services::get_additional_data_or_fail, protocol};
 
@@ -317,23 +318,31 @@ pub(crate) async fn get_cycle_rewards(
                 let metadata: BlockMetadata =
                     serde_json::from_str(&response).unwrap_or_default();
 
-                let response = connection
-                    .apply_block_operations_metadata(
-                        chain_id.clone(),
-                        ApplyBlockRequest::convert_operations(operations_data),
-                        block_json_data.operations_proto_metadata_bytes,
-                        block_additional_data.protocol_hash.clone(),
-                        block_additional_data.next_protocol_hash.clone(),
-                    )
-                    .await;
+                let converted_ops = ApplyBlockRequest::convert_operations(operations_data);
 
-                let response = if let Ok(response) = response {
-                    response
+                // Optimalization: Deserialize the operations only when the anonymous validation pass is not empty
+                // Further optimalization would be the ability to deserialize only one validation pass
+                let block_operations: Option<BlockOperations> = if !converted_ops[2].is_empty() {
+                    let response = connection
+                        .apply_block_operations_metadata(
+                            chain_id.clone(),
+                            converted_ops,
+                            block_json_data.operations_proto_metadata_bytes,
+                            block_additional_data.protocol_hash.clone(),
+                            block_additional_data.next_protocol_hash.clone(),
+                        )
+                        .await;
+
+                    let response = if let Ok(response) = response {
+                        response
+                    } else {
+                        continue;
+                    };
+
+                    Some(serde_json::from_str(&response).unwrap_or_default())
                 } else {
-                    continue;
+                    None
                 };
-
-                let block_operations: BlockOperations = serde_json::from_str(&response).unwrap_or_default();
 
                 if let Some(balance_updates) = metadata.get("balance_updates") {
                     if let Some(balance_updates_array) = balance_updates.as_array() {
@@ -395,29 +404,29 @@ pub(crate) async fn get_cycle_rewards(
                 //     }
                 // }
 
-                for operations in &block_operations[2] {
-                    let operation: OperationRepresentation = serde_json::from_str(operations.get())?;
-
-                    for content in operation.contents {
-                        match content.kind {
-                            OperationKind::DoubleBakingEvidence |
-                            OperationKind::DoubleEndorsementEvidence |
-                            OperationKind::DoublePreendorsementEvidence |
-                            OperationKind::SeedNonceRevelation => {
-                                for balance_update in content.metadata.balance_updates {
-                                    if let BalanceUpdateKind::Contract(contract_updates) = balance_update {
-                                        result
-                                            .entry(contract_updates.contract.clone())
-                                            .or_insert_with(CycleRewardsInt::default)
-                                            .sum += BigInt::from_str(&contract_updates.change)?;
+                if let Some(block_operations) = block_operations {
+                    for operations in &block_operations[2] {
+                        let operation: OperationRepresentation = serde_json::from_str(operations.get())?;
+    
+                        for content in operation.contents {
+                            match content.kind {
+                                OperationKind::DoubleBakingEvidence |
+                                OperationKind::DoubleEndorsementEvidence |
+                                OperationKind::DoublePreendorsementEvidence |
+                                OperationKind::SeedNonceRevelation => {
+                                    for balance_update in content.metadata.balance_updates {
+                                        if let BalanceUpdateKind::Contract(contract_updates) = balance_update {
+                                            result
+                                                .entry(contract_updates.contract.clone())
+                                                .or_insert_with(CycleRewardsInt::default)
+                                                .sum += BigInt::from_str(&contract_updates.change)?;
+                                        }
                                     }
                                 }
+                                _ => { /* Ignore */ }
                             }
-                            _ => { /* Ignore */ }
                         }
                     }
-
-                    // operations.as_array()
                 }
             }
 
