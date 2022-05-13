@@ -365,7 +365,7 @@ pub(crate) async fn get_cycle_rewards(
                                         .sum += BigInt::from_str(&contract_updates.change)?;
                                 
                                     // DEBUG
-                                    // if contract_updates.contract == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+                                    // if contract_updates.contract == "tz1ZNnVcwJk53UuBvMjAW7DF1UGXZqmShQSp" {
                                     //     slog::crit!(env.log(), "Level {} - Block hash {}: {:#?}", block_header.hash, block_header.header.level(), contract_updates)
                                     // }
                                 }
@@ -430,6 +430,12 @@ pub(crate) async fn get_cycle_rewards(
                 }
             }
 
+            // trim all delegates that has 0 rewards (deposit changes could still occur after being inactive)
+            // so only active delegates will be checked
+            result.retain(|_, reward| {
+                reward.sum != BigInt::from(0)
+            });
+
             slog::crit!(env.log(), "REWARDS OK");
 
             // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES - 1
@@ -452,6 +458,7 @@ pub(crate) async fn get_cycle_rewards(
 
             let frozen_snapshot_block = get_snapshot_block(frozen_start, frozen_cycle_snapshot);
             let frozen_snapshot_block_hash = parse_block_hash(chain_id, &frozen_snapshot_block.to_string(), env)?;
+            slog::crit!(env.log(), "FROZEN BLOCK: {frozen_snapshot_block}");
 
             slog::crit!(env.log(), "FROZEN STUFF OK");
 
@@ -496,7 +503,7 @@ pub(crate) async fn get_cycle_rewards(
                 }
 
                 if delegate_info.delegated_balance == delegator_balance_sum {
-                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK", delegate);
+                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK (total rewards {} - stake {})", delegate, cycle_rewards.sum, delegate_info.staking_balance.clone());
                 } else {
                     slog::crit!(env.log(), "{}'s DELEGATOR BALANCES is off", delegate);
                     slog::crit!(env.log(), "Actual: {} - Summed: {} - Diff: {}", delegate_info.delegated_balance.clone(), delegator_balance_sum.clone(), (delegator_balance_sum - delegate_info.delegated_balance.clone()).abs());
