@@ -19,6 +19,22 @@ use time::{Instant, Duration};
 
 use super::{base_services::get_additional_data_or_fail, protocol};
 
+pub struct CycleRewardsFilter {
+    pub delegate: Option<String>,
+    pub commission: Option<i32>,
+    pub exclude_accusation_rewards: bool,
+}
+
+impl CycleRewardsFilter {
+    pub fn new(delegate: Option<String>, commission: Option<i32>, exclude_accusation_rewards: bool) -> Self {
+        Self {
+            delegate,
+            commission,
+            exclude_accusation_rewards,
+        }
+    }
+}
+
 /// A struct holding the reward values as mutez strings to be able to serialize BigInts
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct CycleRewards {
@@ -287,12 +303,8 @@ pub(crate) async fn get_cycle_rewards(
     chain_id: &ChainId,
     env: &RpcServiceEnvironment,
     cycle_num: i32,
+    filter: CycleRewardsFilter,
 ) -> Result<CycleRewardDistribution, anyhow::Error> {
-    // TODO: get from constants
-    const PRESERVED_CYCLES: i32 = 3;
-
-    // TODO: get from query arg, default to 15?
-    const COMISSION_PERCENTAGE: u16 = 15;
 
     let block_meta_storage = BlockMetaStorage::new(env.persistent_storage());
     let block_storage = BlockStorage::new(env.persistent_storage());
@@ -478,90 +490,32 @@ pub(crate) async fn get_cycle_rewards(
 
             slog::crit!(env.log(), "REWARDS OK");
 
-            // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES - 1
-            let frozen_cycle = cycle_num - PRESERVED_CYCLES - 1;
-            let frozen_cycle_era = get_cycle_era(&saved_cycle_era_in_proto_hash, frozen_cycle, env)?;
-            let (frozen_start, frozen_end) = cycle_range(&frozen_cycle_era, frozen_cycle);
-
-            let frozen_end_hash = parse_block_hash(chain_id, &frozen_end.to_string(), env)?;
-
-            let frozen_cycle_snapshot = get_routed_request(
-                &format!("chains/main/blocks/{end}/context/selected_snapshot?cycle={cycle_num}"),
-                // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                end_hash.clone(),
+            let snapshot_info = SnapshotCycleInfo::fetch_snapshot_cycle(
+                cycle_num,
+                end_hash,
+                end,
+                &saved_cycle_era_in_proto_hash,
+                chain_id,
                 env
             ).await?;
 
-            slog::crit!(env.log(), "CYCLE SNAPSHOT RAW: {:#?}", frozen_cycle_snapshot);
-
-            let frozen_cycle_snapshot = frozen_cycle_snapshot.trim_end_matches('\n').parse::<i32>()?;
-
-            let frozen_snapshot_block = get_snapshot_block(frozen_start, frozen_cycle_snapshot);
-            let frozen_snapshot_block_hash = parse_block_hash(chain_id, &frozen_snapshot_block.to_string(), env)?;
-            slog::crit!(env.log(), "FROZEN BLOCK: {frozen_snapshot_block}");
-
-            slog::crit!(env.log(), "FROZEN STUFF OK");
-
             // we need to get all the delegators for a specific delegate
-            let mut delegate_info_map: BTreeMap<Delegate, DelegateInfoInt> = BTreeMap::new();
+            // let mut delegate_info_map: BTreeMap<Delegate, DelegateInfoInt> = BTreeMap::new();
             let mut delegates_reward_distribution: CycleRewardDistribution = Vec::with_capacity(result.len());
-            for (delegate, cycle_rewards) in result.iter() {
-                let delegate_info_string = get_routed_request(
-                    &format!("chains/main/blocks/{frozen_snapshot_block}/context/delegates/{delegate}"),
-                    // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                    frozen_snapshot_block_hash.clone(),
-                    env
-                ).await?;
-                let mut delegate_info: DelegateInfoInt = serde_json::from_str::<DelegateInfo>(&delegate_info_string)?.try_into()?;
 
-                let mut reward_distributon = DelegateRewardDistribution::new(
-                    delegate.clone(),
-                    cycle_rewards.sum.to_string(),
-                    delegate_info.staking_balance.to_string(),
-                );
-
-                slog::crit!(env.log(), "DELEGATE INFO OK");
-
-                let delegators = delegate_info.delegated_contracts.clone();
-                let mut delegator_balance_sum: BigInt = BigInt::new(Sign::Plus, vec![0]);
-                for delegator in delegators {
-                    // ignore the delegate itseld as it is part of the list
-                    if &delegator == delegate {
-                        continue;
-                    }
-                    let delegator_balance = get_routed_request(
-                        &format!("chains/main/blocks/{frozen_snapshot_block}/context/raw/json/contracts/index/{delegator}/balance"),
-                        // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
-                        frozen_snapshot_block_hash.clone(),
-                        env
-                    ).await?;
-                    // slog::crit!(env.log(), "DELEGATOR BALANCE RAW: {:#?}", delegator_balance.trim_end_matches('\n').trim_matches('\"'));
-                    let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
-                    
-                    let delegator_reward_share = get_delegator_reward_share(delegate_info.staking_balance.clone(), cycle_rewards.sum.clone(), delegator_balance.clone());
-                    let delegator_info = DelegatorInfo::new(delegator.clone(), delegator_balance.to_string(), delegator_reward_share.to_string());
-                    reward_distributon.insert_delegator_reward(&delegator, delegator_info);
-
-                    delegator_balance_sum += delegator_balance.clone();
-                    delegate_info.delegator_balances.insert(delegator, delegator_balance);
+            if let Some(delegate) = filter.delegate {
+                if let Some(cycle_rewards) = result.get(&delegate) {
+                    let reward_distributon = get_delegate_reward_distribution(&delegate, cycle_rewards.sum.clone(), &snapshot_info, env).await?;
+                    delegates_reward_distribution.push(reward_distributon);
                 }
-
-                if delegate_info.delegated_balance == delegator_balance_sum {
-                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK (total rewards {} - stake {})", delegate, cycle_rewards.sum, delegate_info.staking_balance.clone());
-                } else {
-                    slog::crit!(env.log(), "{}'s DELEGATOR BALANCES is off", delegate);
-                    slog::crit!(env.log(), "Actual: {} - Summed: {} - Diff: {}", delegate_info.delegated_balance.clone(), delegator_balance_sum.clone(), (delegator_balance_sum - delegate_info.delegated_balance.clone()).abs());
-                    slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
+            } else {
+                for (delegate, cycle_rewards) in result.iter() {
+                    let reward_distributon = get_delegate_reward_distribution(delegate, cycle_rewards.sum.clone(), &snapshot_info, env).await?;
+                    delegates_reward_distribution.push(reward_distributon);
+                    // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
                 }
-
-                // DEBUG
-                // if delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
-                //     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
-                // }
-                delegate_info_map.insert(delegate.to_string(), delegate_info);
-                delegates_reward_distribution.push(reward_distributon);
-                // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
             }
+
             Ok(delegates_reward_distribution)
         }
         _ => {
@@ -571,11 +525,121 @@ pub(crate) async fn get_cycle_rewards(
             .into())
         }
     }
+}
 
-    // Ok(result
-    //     .into_iter()
-    //     .map(|(delegate, rewards)| (delegate, rewards.into()))
-    //     .collect())
+struct SnapshotCycleInfo {
+    cycle: i32,
+    snapshot_block_level: i32,
+    snapshot_block_hash: BlockHash,
+    first_block_level: i32,
+    // first_block_hash: String,
+    last_block_level: i32,
+    last_block_hash: BlockHash,
+}
+
+impl SnapshotCycleInfo {
+    async fn fetch_snapshot_cycle(interrogated_cycle: i32, block_hash: BlockHash, level: i32, protocol_hash: &ProtocolHash, chain_id: &ChainId, env: &RpcServiceEnvironment) -> Result<Self, anyhow::Error> {
+        // TODO: get from constants
+        const PRESERVED_CYCLES: i32 = 3;
+        // for the interogated cycle the delegate stuff was set at the end of current_cycle - PRESERVED_CYCLES - 1
+        let cycle = interrogated_cycle - PRESERVED_CYCLES - 1;
+        let frozen_cycle_era = get_cycle_era(protocol_hash, cycle, env)?;
+        let (first_block_level, last_block_level) = cycle_range(&frozen_cycle_era, cycle);
+
+        let last_block_hash = parse_block_hash(chain_id, &last_block_level.to_string(), env)?;
+
+        let frozen_cycle_snapshot = get_routed_request(
+            &format!("chains/main/blocks/{level}/context/selected_snapshot?cycle={interrogated_cycle}"),
+            // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
+            block_hash,
+            env
+        ).await?;
+
+        slog::crit!(env.log(), "CYCLE SNAPSHOT RAW: {:#?}", frozen_cycle_snapshot);
+
+        let frozen_cycle_snapshot = frozen_cycle_snapshot.trim_end_matches('\n').parse::<i32>()?;
+
+        let snapshot_block_level = get_snapshot_block(first_block_level, frozen_cycle_snapshot);
+        let snapshot_block_hash = parse_block_hash(chain_id, &snapshot_block_level.to_string(), env)?;
+        slog::crit!(env.log(), "FROZEN BLOCK: {snapshot_block_level}");
+
+        slog::crit!(env.log(), "FROZEN STUFF OK");
+
+        Ok(
+            Self {
+                cycle,
+                snapshot_block_level,
+                snapshot_block_hash,
+                first_block_level,
+                last_block_level,
+                last_block_hash,
+            }
+        )
+    }
+}
+
+async fn get_delegate_reward_distribution(delegate: &str, total_rewards: BigInt, snapshot_info: &SnapshotCycleInfo, env: &RpcServiceEnvironment) -> Result<DelegateRewardDistribution, anyhow::Error> {
+    let SnapshotCycleInfo {
+        cycle,
+        snapshot_block_level,
+        snapshot_block_hash,
+        ..
+    } = snapshot_info;
+    
+    let delegate_info_string = get_routed_request(
+        &format!("chains/main/blocks/{snapshot_block_level}/context/delegates/{delegate}"),
+        // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
+        snapshot_block_hash.clone(),
+        env
+    ).await?;
+    let mut delegate_info: DelegateInfoInt = serde_json::from_str::<DelegateInfo>(&delegate_info_string)?.try_into()?;
+
+    let mut reward_distributon = DelegateRewardDistribution::new(
+        delegate.to_string(),
+        total_rewards.to_string(),
+        delegate_info.staking_balance.to_string(),
+    );
+
+    slog::crit!(env.log(), "DELEGATE INFO OK");
+
+    let delegators = delegate_info.delegated_contracts.clone();
+    let mut delegator_balance_sum: BigInt = BigInt::new(Sign::Plus, vec![0]);
+    for delegator in delegators {
+        // ignore the delegate itseld as it is part of the list
+        if delegator == delegate {
+            continue;
+        }
+        let delegator_balance = get_routed_request(
+            &format!("chains/main/blocks/{snapshot_block_level}/context/raw/json/contracts/index/{delegator}/balance"),
+            // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
+            snapshot_block_hash.clone(),
+            env
+        ).await?;
+        // slog::crit!(env.log(), "DELEGATOR BALANCE RAW: {:#?}", delegator_balance.trim_end_matches('\n').trim_matches('\"'));
+        let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
+        
+        let delegator_reward_share = get_delegator_reward_share(delegate_info.staking_balance.clone(), total_rewards.clone(), delegator_balance.clone());
+        let delegator_info = DelegatorInfo::new(delegator.clone(), delegator_balance.to_string(), delegator_reward_share.to_string());
+        reward_distributon.insert_delegator_reward(&delegator, delegator_info);
+
+        delegator_balance_sum += delegator_balance.clone();
+        delegate_info.delegator_balances.insert(delegator, delegator_balance);
+    }
+
+    if delegate_info.delegated_balance == delegator_balance_sum {
+        slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK (total rewards {} - stake {})", delegate, total_rewards, delegate_info.staking_balance.clone());
+    } else {
+        slog::crit!(env.log(), "{}'s DELEGATOR BALANCES is off", delegate);
+        slog::crit!(env.log(), "Actual: {} - Summed: {} - Diff: {}", delegate_info.delegated_balance.clone(), delegator_balance_sum.clone(), (delegator_balance_sum - delegate_info.delegated_balance.clone()).abs());
+        slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
+    }
+
+    // DEBUG
+    // if delegate == "tz1Qm727PrLHPme6gcz2Gg8YAXqUrq8oDhio" {
+    //     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
+    // }
+    // delegate_info_map.insert(delegate.to_string(), delegate_info);
+    Ok(reward_distributon)
 }
 
 fn get_cycle_era(protocol_hash: &ProtocolHash, cycle_num: i32, env: &RpcServiceEnvironment) -> Result<CycleEra, anyhow::Error> {
