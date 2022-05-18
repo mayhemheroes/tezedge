@@ -238,9 +238,49 @@ pub type Delegate = String;
 pub type Delegator = String;
 pub type DelegateCycleRewards = BTreeMap<Delegate, CycleRewards>;
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DelegateRewardDistribution {
+    address: String,
+    total_rewards: String,
+    staking_balance: String,
+    delegator_rewards: Vec<DelegatorInfo>,
+}
+
+impl DelegateRewardDistribution {
+    fn new(address: String, total_rewards: String, staking_balance: String) -> Self {
+        Self {
+            address,
+            total_rewards,
+            staking_balance,
+            delegator_rewards: Vec::new(),
+        }
+    }
+
+    fn insert_delegator_reward(&mut self, delegator: &str, delegator_info: DelegatorInfo) {
+        self.delegator_rewards.push(delegator_info);
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DelegatorInfo {
+    address: String,
+    balance: String,
+    reward: String,
+}
+
+impl DelegatorInfo {
+    fn new(address: String, balance: String, reward: String) -> Self {
+        Self {
+            address,
+            balance,
+            reward,
+        }
+    }
+}
+
 // To serialize bigint we use its string form
-pub type DelegateRewardDistribution = BTreeMap<Delegator, String>;
-pub type CycleRewardDistribution = BTreeMap<Delegate, DelegateRewardDistribution>;
+// pub type DelegateRewardDistribution = BTreeMap<Delegator, String>;
+pub type CycleRewardDistribution = Vec<DelegateRewardDistribution>;
 
 // TODO: create proper errors
 pub(crate) async fn get_cycle_rewards(
@@ -464,17 +504,21 @@ pub(crate) async fn get_cycle_rewards(
 
             // we need to get all the delegators for a specific delegate
             let mut delegate_info_map: BTreeMap<Delegate, DelegateInfoInt> = BTreeMap::new();
-            let mut delegates_reward_distribution: CycleRewardDistribution = BTreeMap::new();
+            let mut delegates_reward_distribution: CycleRewardDistribution = Vec::with_capacity(result.len());
             for (delegate, cycle_rewards) in result.iter() {
-                let mut reward_distributon = DelegateRewardDistribution::new();
                 let delegate_info_string = get_routed_request(
                     &format!("chains/main/blocks/{frozen_snapshot_block}/context/delegates/{delegate}"),
                     // TODO: we need current head? more likely a specific block inside the cycle (snapshot)
                     frozen_snapshot_block_hash.clone(),
                     env
                 ).await?;
-                // Note: the list includes the delegate itself as well, we need to consider this later
                 let mut delegate_info: DelegateInfoInt = serde_json::from_str::<DelegateInfo>(&delegate_info_string)?.try_into()?;
+
+                let mut reward_distributon = DelegateRewardDistribution::new(
+                    delegate.clone(),
+                    cycle_rewards.sum.to_string(),
+                    delegate_info.staking_balance.to_string(),
+                );
 
                 slog::crit!(env.log(), "DELEGATE INFO OK");
 
@@ -495,8 +539,8 @@ pub(crate) async fn get_cycle_rewards(
                     let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
                     
                     let delegator_reward_share = get_delegator_reward_share(delegate_info.staking_balance.clone(), cycle_rewards.sum.clone(), delegator_balance.clone());
-
-                    reward_distributon.insert(delegator.clone(), delegator_reward_share.to_string());
+                    let delegator_info = DelegatorInfo::new(delegator.clone(), delegator_balance.to_string(), delegator_reward_share.to_string());
+                    reward_distributon.insert_delegator_reward(&delegator, delegator_info);
 
                     delegator_balance_sum += delegator_balance.clone();
                     delegate_info.delegator_balances.insert(delegator, delegator_balance);
@@ -515,7 +559,7 @@ pub(crate) async fn get_cycle_rewards(
                 //     slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegator_balances);
                 // }
                 delegate_info_map.insert(delegate.to_string(), delegate_info);
-                delegates_reward_distribution.insert(delegate.to_string(), reward_distributon);
+                delegates_reward_distribution.push(reward_distributon);
                 // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
             }
             Ok(delegates_reward_distribution)
