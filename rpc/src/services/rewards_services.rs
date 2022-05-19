@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::{BTreeMap, HashSet}, str::FromStr};
 
 use crate::{
     helpers::{parse_block_hash, BlockMetadata, RpcServiceError, MAIN_CHAIN_ID, parse_chain_id, BlockOperations},
@@ -398,7 +398,7 @@ pub(crate) async fn get_cycle_rewards(
 
                 if let Some(balance_updates) = metadata.get("balance_updates") {
                     if let Some(balance_updates_array) = balance_updates.as_array() {
-                        // balance_updates_array.iter().map(|val| serde_json::from_value(val.clone()).unwrap_or_default()).collect()
+                        let mut previous: Option<BalanceUpdateKind> = None;
                         for balance_update in balance_updates_array {
                             // deserialize
                             let balance_update: BalanceUpdateKind =
@@ -409,17 +409,22 @@ pub(crate) async fn get_cycle_rewards(
                             // {
                                 
                             // }
-                            match balance_update {
+                            match balance_update.clone() {
                                 BalanceUpdateKind::Contract(contract_updates) => {
-                                    result
+                                    let entry = result
                                         .entry(contract_updates.contract.clone())
-                                        .or_insert_with(CycleRewardsInt::default)
-                                        .sum += BigInt::from_str(&contract_updates.change)?;
-                                
-                                    // DEBUG
-                                    // if contract_updates.contract == "tz1ZNnVcwJk53UuBvMjAW7DF1UGXZqmShQSp" {
-                                    //     slog::crit!(env.log(), "Level {} - Block hash {}: {:#?}", block_header.hash, block_header.header.level(), contract_updates)
-                                    // }
+                                        .or_insert_with(CycleRewardsInt::default);
+                                    let change = BigInt::from_str(&contract_updates.change)?;
+                                    entry.sum += change.clone();
+                                    
+                                    // the endorsement reward is always minted right before adding it to the contract
+                                    if let Some(BalanceUpdateKind::Minted(prev)) = previous {
+                                        if let BalanceUpdateCategory::EndorsingRewards = prev.category {
+                                            if change == BigInt::from_str(&prev.change)?.abs() {
+                                                entry.endorsement_rewards = change;
+                                            }
+                                        }
+                                    }
                                 }
                                 // The contract balance_update subtracts the deposit, we just add back the deposited amount
                                 BalanceUpdateKind::Freezer(freezer_update) => {
@@ -442,6 +447,7 @@ pub(crate) async fn get_cycle_rewards(
                                 // }
                                 _ => { /* Ignore other receipts */ }
                             }
+                            previous = Some(balance_update);
                         }
                     } else {
                         anyhow::bail!("Balance updates not an array");
@@ -449,12 +455,6 @@ pub(crate) async fn get_cycle_rewards(
                 } else {
                     anyhow::bail!("Balance updates not found");
                 };
-
-                // for val_pass in block_operations {
-                //     for op in val_pass {
-                //         slog::crit!(env.log(), "Ops: {:#?}", op.get());
-                //     }
-                // }
 
                 if let Some(block_operations) = block_operations {
                     for operations in &block_operations[2] {
@@ -505,12 +505,12 @@ pub(crate) async fn get_cycle_rewards(
 
             if let Some(delegate) = filter.delegate {
                 if let Some(cycle_rewards) = result.get(&delegate) {
-                    let reward_distributon = get_delegate_reward_distribution(&delegate, cycle_rewards.sum.clone(), &snapshot_info, env).await?;
+                    let reward_distributon = get_delegate_reward_distribution(&delegate, &cycle_rewards.clone(), &snapshot_info, env).await?;
                     delegates_reward_distribution.push(reward_distributon);
                 }
             } else {
                 for (delegate, cycle_rewards) in result.iter() {
-                    let reward_distributon = get_delegate_reward_distribution(delegate, cycle_rewards.sum.clone(), &snapshot_info, env).await?;
+                    let reward_distributon = get_delegate_reward_distribution(delegate, &cycle_rewards.clone(), &snapshot_info, env).await?;
                     delegates_reward_distribution.push(reward_distributon);
                     // slog::crit!(env.log(), "{}'s delegators: {:#?}", delegate, delegate_info.delegated_contracts);
                 }
@@ -529,6 +529,7 @@ pub(crate) async fn get_cycle_rewards(
 
 struct SnapshotCycleInfo {
     cycle: i32,
+    snapshot_index: i32,
     snapshot_block_level: i32,
     snapshot_block_hash: BlockHash,
     first_block_level: i32,
@@ -557,9 +558,9 @@ impl SnapshotCycleInfo {
 
         slog::crit!(env.log(), "CYCLE SNAPSHOT RAW: {:#?}", frozen_cycle_snapshot);
 
-        let frozen_cycle_snapshot = frozen_cycle_snapshot.trim_end_matches('\n').parse::<i32>()?;
+        let snapshot_index = frozen_cycle_snapshot.trim_end_matches('\n').parse::<i32>()?;
 
-        let snapshot_block_level = get_snapshot_block(first_block_level, frozen_cycle_snapshot);
+        let snapshot_block_level = get_snapshot_block(first_block_level, snapshot_index);
         let snapshot_block_hash = parse_block_hash(chain_id, &snapshot_block_level.to_string(), env)?;
         slog::crit!(env.log(), "FROZEN BLOCK: {snapshot_block_level}");
 
@@ -568,6 +569,7 @@ impl SnapshotCycleInfo {
         Ok(
             Self {
                 cycle,
+                snapshot_index,
                 snapshot_block_level,
                 snapshot_block_hash,
                 first_block_level,
@@ -578,11 +580,12 @@ impl SnapshotCycleInfo {
     }
 }
 
-async fn get_delegate_reward_distribution(delegate: &str, total_rewards: BigInt, snapshot_info: &SnapshotCycleInfo, env: &RpcServiceEnvironment) -> Result<DelegateRewardDistribution, anyhow::Error> {
+async fn get_delegate_reward_distribution(delegate: &str, rewards: &CycleRewardsInt, snapshot_info: &SnapshotCycleInfo, env: &RpcServiceEnvironment) -> Result<DelegateRewardDistribution, anyhow::Error> {
     let SnapshotCycleInfo {
         cycle,
         snapshot_block_level,
         snapshot_block_hash,
+        snapshot_index,
         ..
     } = snapshot_info;
     
@@ -594,10 +597,16 @@ async fn get_delegate_reward_distribution(delegate: &str, total_rewards: BigInt,
     ).await?;
     let mut delegate_info: DelegateInfoInt = serde_json::from_str::<DelegateInfo>(&delegate_info_string)?.try_into()?;
 
+    let staking_balance = if *snapshot_index == 15 {
+        delegate_info.staking_balance - rewards.endorsement_rewards.clone()
+    } else {
+        delegate_info.staking_balance
+    };
+
     let mut reward_distributon = DelegateRewardDistribution::new(
         delegate.to_string(),
-        total_rewards.to_string(),
-        delegate_info.staking_balance.to_string(),
+        rewards.sum.to_string(),
+        staking_balance.to_string(),
     );
 
     slog::crit!(env.log(), "DELEGATE INFO OK");
@@ -618,7 +627,7 @@ async fn get_delegate_reward_distribution(delegate: &str, total_rewards: BigInt,
         // slog::crit!(env.log(), "DELEGATOR BALANCE RAW: {:#?}", delegator_balance.trim_end_matches('\n').trim_matches('\"'));
         let delegator_balance = delegator_balance.trim_end_matches('\n').trim_matches('\"').parse::<BigInt>().ok().unwrap_or_else(|| BigInt::new(Sign::Plus, vec![0]));
         
-        let delegator_reward_share = get_delegator_reward_share(delegate_info.staking_balance.clone(), total_rewards.clone(), delegator_balance.clone());
+        let delegator_reward_share = get_delegator_reward_share(staking_balance.clone(), rewards.sum.clone(), delegator_balance.clone());
         let delegator_info = DelegatorInfo::new(delegator.clone(), delegator_balance.to_string(), delegator_reward_share.to_string());
         reward_distributon.insert_delegator_reward(&delegator, delegator_info);
 
@@ -627,7 +636,7 @@ async fn get_delegate_reward_distribution(delegate: &str, total_rewards: BigInt,
     }
 
     if delegate_info.delegated_balance == delegator_balance_sum {
-        slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK (total rewards {} - stake {})", delegate, total_rewards, delegate_info.staking_balance.clone());
+        slog::crit!(env.log(), "{}'s DELEGATOR BALANCES OK (total rewards {} - stake {})", delegate, rewards.sum, staking_balance.clone());
     } else {
         slog::crit!(env.log(), "{}'s DELEGATOR BALANCES is off", delegate);
         slog::crit!(env.log(), "Actual: {} - Summed: {} - Diff: {}", delegate_info.delegated_balance.clone(), delegator_balance_sum.clone(), (delegator_balance_sum - delegate_info.delegated_balance.clone()).abs());
