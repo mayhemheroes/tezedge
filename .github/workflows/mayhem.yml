@@ -59,11 +59,74 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Start analysis for params
+      - name: Start analysis for ack
         uses: ForAllSecure/mcode-action@v1
         with:
           mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
           args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.ack_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+      
+      - name: Start analysis for advertise
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.advertise_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+      
+      - name: Start analysis for connection
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.connection_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+      
+      - name: Start analysis for current_branch
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.current_branch_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+      
+      - name: Start analysis for current_head
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.current_head_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+
+      - name: Start analysis for metadata
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.metadata_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+
+      - name: Start analysis for operation
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.operation_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+
+      - name: Start analysis for operations_for_blocks
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.operations_for_blocks_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+
+      - name: Start analysis for peer_response
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.peer_response_message_mayhemfile}} --duration 300
+          sarif-output: sarif
+      
+      - name: Start analysis for protocol
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ steps.meta.outputs.tags }} --file ${{ env.protocol_message_mayhemfile}} --duration 300
           sarif-output: sarif
 
       - name: Upload SARIF file(s)
