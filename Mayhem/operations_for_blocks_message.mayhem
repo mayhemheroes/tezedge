@@ -1,5 +1,5 @@
 project: code-terror/tezedge
-target: fuzz_ack_message
+target: fuzz_operations_for_blocks_message
 
 cmds:
   - cmd: ./operations_for_blocks_message/fuzz_operations_for_blocks_message
