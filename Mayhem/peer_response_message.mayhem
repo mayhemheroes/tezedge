@@ -1,5 +1,5 @@
 project: code-terror/tezedge
-target: fuzz_ack_message
+target: fuzz_peer_response_message
 
 cmds:
   - cmd: ./peer_response_message/fuzz_peer_response_message
