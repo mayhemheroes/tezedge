@@ -1,9 +1,0 @@
-project: code-terror/tezedge
-target: fuzz_ack_message
-
-cmds:
-  - cmd: ./tezedge/fuzz/ack_message/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_ack_message
-  - cmd: ./tezedge/fuzz/advertise_message/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_advertise_message
-  - cmd: ./tezedge/fuzz/block_header_message/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_block_header_message
-  - cmd: ./tezedge/fuzz/connection_message/hfuzz_target/x86_64-unknown-linux-gnu/release/fuzz_ack_message
-    honggfuzz: true
