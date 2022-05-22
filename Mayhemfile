@@ -1,0 +1,6 @@
+project: code-terror/evm
+target: evm_fuzz
+
+cmds:
+  - cmd: ./evm_fuzz
+    honggfuzz: true
