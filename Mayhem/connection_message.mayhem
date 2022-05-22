@@ -1,0 +1,6 @@
+project: code-terror/tezedge
+target: fuzz_ack_message
+
+cmds:
+  - cmd: ./connection_message/fuzz_connection_message
+    honggfuzz: true
