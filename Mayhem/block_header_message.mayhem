@@ -1,0 +1,6 @@
+project: code-terror/tezedge
+target: fuzz_ack_message
+
+cmds:
+  - cmd: ./block_header_message/fuzz_block_header_message
+    honggfuzz: true
