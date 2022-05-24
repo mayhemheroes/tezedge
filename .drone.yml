@@ -6291,15 +6291,15 @@ steps:
     - cp tezos-mitten/tezos-baker-012-Psithaca tezos-mitten/bins/
     - cp tezos-mitten/tezos-client tezos-mitten/bins/
     - cp tezos-mitten/tezos-node tezos-mitten/bins/tezos-node.octez
-    - cp drone-cache/mitten/tezos-node tezos-mitten/
-    - cp drone-cache/build_files/light-node drone-cache/build_files/protocol-runner tezos-mitten/
-    - cp drone-cache/build_files/ffi/libtezos.so tezos-mitten/
+    - cp drone-cache/mitten/tezos-node tezos-mitten/bins/
+    - cp drone-cache/build_files/light-node drone-cache/build_files/protocol-runner tezos-mitten/bins/
+    - cp drone-cache/build_files/ffi/libtezos.so tezos-mitten/bins/
     - |
-      cat >tezos-mitten/tezedge.env <<EOF
+      cat >tezos-mitten/bins/tezedge.env <<EOF
       export HOME=$HOME
       EOF
     - |
-      cat >tezos-mitten/tezedge.config <<EOF
+      cat >tezos-mitten/bins/tezedge.config <<EOF
       --init-sapling-spend-params-file=$DRONE_WORKSPACE/drone-cache/build_files/ffi/sapling-spend.params
       --init-sapling-output-params-file=$DRONE_WORKSPACE/drone-cache/build_files/ffi/sapling-output.params
       EOF
