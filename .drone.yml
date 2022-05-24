@@ -6287,25 +6287,33 @@ steps:
 - name: copy-files
   image: tezedge/tezedge-ci-builder:rust-1.58.1-v13.0-octez
   commands:
-    - mkdir tezos-mitten/bins
+    - BINS_DIR=tezos-mitten/bins
+    - mkdir $BINS_DIR
+    # copy Octez binaries
     - TEZOS_DIR=/home/appuser/tezos-src/tezos/
-    - cp $TEZOS_DIR/tezos-baker-012-Psithaca tezos-mitten/bins/tezos-baker-012-Psithaca.octez
-    - cp $TEZOS_DIR/tezos-accuser-012-Psithaca tezos-mitten/bins/
-    - cp $TEZOS_DIR/tezos-accuser-012-Psithaca tezos-mitten/bins/
-    - cp tezos-mitten/tezos-client tezos-mitten/bins/
-    - cp tezos-mitten/tezos-node tezos-mitten/bins/tezos-node.octez
-    - cp drone-cache/mitten/* tezos-mitten/bins/
-    - cp drone-cache/build_files/light-node drone-cache/build_files/protocol-runner tezos-mitten/bins/
-    - cp drone-cache/build_files/ffi/libtezos.so tezos-mitten/bins/
     - |
-      cat >tezos-mitten/bins/tezedge.env <<EOF
+      for f in tezos-node tezos-client tezos-accuser-012-Psithaca tezos-baker-012-Psithaca; do
+          cp $TEZOS_DIR/$f $BINS_DIR
+      done
+      mv $BINS_DIR/tezos-baker-012-Psithaca $BINS_DIR/tezos-baker-012-Psithaca.octez
+    # copy Tezedge binaries
+    - |
+      for f in light-node protocol-runner ffi/libtezos.so; do
+          cp drone-cache/build_files/$f $BINS_DIR
+      done
+    # copy wrapper scripts
+    - cp drone-cache/mitten/* $BINS_DIR
+    # create config templates
+    - |
+      cat >$BINS_DIR/tezedge.env <<EOF
       export HOME=$HOME
       EOF
     - |
-      cat >tezos-mitten/bins/tezedge.config <<EOF
+      cat >$BINS_DIR/tezedge.config <<EOF
       --init-sapling-spend-params-file=$DRONE_WORKSPACE/drone-cache/build_files/ffi/sapling-spend.params
       --init-sapling-output-params-file=$DRONE_WORKSPACE/drone-cache/build_files/ffi/sapling-output.params
       EOF
+    # create logs and data dirs
     - mkdir tezos-mitten/data
     - mkdir tezos-mitten/logs
 
