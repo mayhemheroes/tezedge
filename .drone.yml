@@ -6336,9 +6336,6 @@ steps:
 - name: vary_endorsing_power_and_bake_till_10
   <<: *mitten-test
 
-- name: resume_after_network_failure
-  <<: *mitten-test
-
 ## failing cases
 
 # The consensus committee size must be strictly greater than 3.
@@ -6379,6 +6376,11 @@ steps:
 
 # The consensus committee size must be strictly greater than 3.
 - name: reproposal
+  failure: ignore
+  <<: *mitten-test
+
+# Baker state is missing -- special version of tezos-baker is needed.
+- name: resume_after_network_failure
   failure: ignore
   <<: *mitten-test
 
