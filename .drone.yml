@@ -6224,21 +6224,21 @@ depends_on:
   - build-tezedge-binaries
 
 volumes:
-  - name: opam
+  - name: appuser
     temp: {}
 
 defs:
   - &mitten-test
     image: tezedge/tezedge-ci-builder:rust-1.58.1-v13.0-octez
     volumes:
-      - name: opam
+      - name: appuser
         path: /home/appuser/
     commands:
       - cd tezos-mitten
       - DATA_DIR=$PWD/data/$$DRONE_STEP_NAME
       - LOGS_DIR=$PWD/logs/$$DRONE_STEP_NAME
       - eval $(opam env)
-      - dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --verbose 2 --timeout 400
+      - GITLAB_CI=1 dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --binaries-dir bins --verbose 2 --timeout 400
 
 steps:
 
@@ -6273,7 +6273,7 @@ steps:
 - name: build-mitten
   image: tezedge/tezedge-ci-builder:rust-1.58.1-v13.0-octez
   volumes:
-    - name: opam
+    - name: appuser
       path: /home/appuser/
   commands:
     - git clone https://gitlab.com/nomadic-labs/tezos.git tezos-mitten -b mitten-ithaca
@@ -6281,15 +6281,17 @@ steps:
     - opam init --disable-sandboxing
     - make build-deps
     - eval $(opam env)
+    - make
     - make mitten
 
 - name: copy-files
   image: tezedge/tezedge-ci-builder:rust-1.58.1-v13.0-octez
   commands:
-    - cp $HOME/tezos-src/tezos/tezos-* tezos-mitten/
-    - ls -ld drone-cache/mitten/tezos-node tezos-mitten/ tezos-mitten/tezos-node
-    - for f in tezos-node tezos-baker-012-Psithaca; do mv tezos-mitten/$f tezos-mitten/$f.octez; done
-    - cp drone-cache/mitten/* tezos-mitten/
+    - mkdir tezos-mitten/bins
+    - cp tezos-mitten/tezos-baker-012-PsIthaca tezos-mitten/bins/
+    - cp tezos-mitten/tezos-client tezos-mitten/bins/
+    - cp tezos-mitten/tezos-node tezos-mitten/bins/tezos-node.octez
+    - cp drone-cache/mitten/tezos-node tezos-mitten/
     - cp drone-cache/build_files/light-node drone-cache/build_files/protocol-runner tezos-mitten/
     - cp drone-cache/build_files/ffi/libtezos.so tezos-mitten/
     - |
