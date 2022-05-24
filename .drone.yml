@@ -6289,6 +6289,7 @@ steps:
   commands:
     - mkdir tezos-mitten/bins
     - cp tezos-mitten/tezos-baker-012-Psithaca tezos-mitten/bins/
+    - cp tezos-mitten/tezos-accuser-012-Psithaca tezos-mitten/bins/
     - cp tezos-mitten/tezos-client tezos-mitten/bins/
     - cp tezos-mitten/tezos-node tezos-mitten/bins/tezos-node.octez
     - cp drone-cache/mitten/tezos-node tezos-mitten/bins/
