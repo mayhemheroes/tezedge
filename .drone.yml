@@ -6238,7 +6238,7 @@ defs:
       - DATA_DIR=$PWD/data/$$DRONE_STEP_NAME
       - LOGS_DIR=$PWD/logs/$$DRONE_STEP_NAME
       - eval $(opam env)
-      - GITLAB_CI=1 dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --binaries-dir bins --verbose 2 --timeout 400
+      - dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --binaries-dir bins --verbose 2 --timeout 400
 
 steps:
 
