@@ -6308,6 +6308,8 @@ steps:
     - |
       cat >$BINS_DIR/tezedge.env <<EOF
       export HOME=$HOME
+      RUN_OCTEZ_NODE=
+      RUN_OCTEZ_BAKER=y
       EOF
     - |
       cat >$BINS_DIR/tezedge.config <<EOF
