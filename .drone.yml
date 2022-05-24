@@ -6295,6 +6295,7 @@ steps:
       for f in tezos-node tezos-client tezos-accuser-012-Psithaca tezos-baker-012-Psithaca; do
           cp $TEZOS_DIR/$f $BINS_DIR
       done
+      mv $BINS_DIR/tezos-node $BINS_DIR/tezos-node.octez
       mv $BINS_DIR/tezos-baker-012-Psithaca $BINS_DIR/tezos-baker-012-Psithaca.octez
     # copy Tezedge binaries
     - |
