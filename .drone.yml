@@ -6288,11 +6288,13 @@ steps:
   image: tezedge/tezedge-ci-builder:rust-1.58.1-v13.0-octez
   commands:
     - mkdir tezos-mitten/bins
-    - cp tezos-mitten/tezos-baker-012-Psithaca tezos-mitten/bins/
-    - cp tezos-mitten/tezos-accuser-012-Psithaca tezos-mitten/bins/
+    - TEZOS_DIR=/home/appuser/tezos-src/tezos/
+    - cp $TEZOS_DIR/tezos-baker-012-Psithaca tezos-mitten/bins/tezos-baker-012-Psithaca.octez
+    - cp $TEZOS_DIR/tezos-accuser-012-Psithaca tezos-mitten/bins/
+    - cp $TEZOS_DIR/tezos-accuser-012-Psithaca tezos-mitten/bins/
     - cp tezos-mitten/tezos-client tezos-mitten/bins/
     - cp tezos-mitten/tezos-node tezos-mitten/bins/tezos-node.octez
-    - cp drone-cache/mitten/tezos-node tezos-mitten/bins/
+    - cp drone-cache/mitten/* tezos-mitten/bins/
     - cp drone-cache/build_files/light-node drone-cache/build_files/protocol-runner tezos-mitten/bins/
     - cp drone-cache/build_files/ffi/libtezos.so tezos-mitten/bins/
     - |
@@ -6334,41 +6336,49 @@ steps:
 - name: vary_endorsing_power_and_bake_till_10
   <<: *mitten-test
 
+- name: resume_after_network_failure
+  <<: *mitten-test
+
 ## failing cases
 
+# The consensus committee size must be strictly greater than 3.
 - name: bake_till_level20_round_robin
   failure: ignore
   <<: *mitten-test
 
+# Passes with non-empty GITLAB_CI and special version of tezos-baker
 - name: simple_pred_fork_negative_with_observed_PQC
   failure: ignore
   <<: *mitten-test
 
+# TODO install libfaketime to opam-builder
 - name: proposal_in_the_future
   failure: ignore
   <<: *mitten-test
 
+# Proposed level 4 round 0
+# TODO investigate further
 - name: baker_not_participating_round_r_because_pqc_previous_round_diff_playload
   failure: ignore
   <<: *mitten-test
 
+# The delay increment per round must be greater than zero
 - name: end_before_proposal
   failure: ignore
   <<: *mitten-test
 
+# The consensus committee size must be strictly greater than 3.
 - name: next_round
   failure: ignore
   <<: *mitten-test
 
+# The delay increment per round must be greater than zero
 - name: preend_before_proposal
   failure: ignore
   <<: *mitten-test
 
+# The consensus committee size must be strictly greater than 3.
 - name: reproposal
-  failure: ignore
-  <<: *mitten-test
-
-- name: resume_after_network_failure
   failure: ignore
   <<: *mitten-test
 
