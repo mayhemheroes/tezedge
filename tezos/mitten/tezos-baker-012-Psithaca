@@ -71,7 +71,7 @@ run_tezedge_baker() {
     done
 
     # shellcheck disable=SC2086
-    exec $CMD
+    RUST_BACKTRACE=1 exec $CMD
 }
 
 TEZEDGE_ENV=${TEZEDGE_ENV:-$(dirname $0)/tezedge.env}
