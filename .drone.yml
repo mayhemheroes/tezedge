@@ -6441,7 +6441,7 @@ defs:
       - DATA_DIR=$PWD/data/$$DRONE_STEP_NAME
       - LOGS_DIR=$PWD/logs/$$DRONE_STEP_NAME
       - eval $(opam env)
-      - dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --binaries-dir bins --verbose 2 --timeout 120
+      - dune exec src/mitten/scenarios/$$DRONE_STEP_NAME.exe -- --data-dir $DATA_DIR --logs-dir $LOGS_DIR --binaries-dir bins --verbose 2 --timeout $${TIMEOUT:-120}
     failure: ignore
 
 steps:
@@ -6535,12 +6535,15 @@ steps:
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_and_preendorse
+  environment: { TIMEOUT: 250 }
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_and_preendorse__5_nodes
+  environment: { TIMEOUT: 250 }
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_risk
+  environment: { TIMEOUT: 400 }
   <<: *mitten-test
 
 - name: locked_no_preendorse
@@ -6753,12 +6756,15 @@ steps:
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_and_preendorse
+  environment: { TIMEOUT: 250 }
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_and_preendorse__5_nodes
+  environment: { TIMEOUT: 250 }
   <<: *mitten-test
 
 - name: advanced_fork_with_double_bake_risk
+  environment: { TIMEOUT: 400 }
   <<: *mitten-test
 
 - name: locked_no_preendorse
