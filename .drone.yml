@@ -133,6 +133,7 @@ trigger:
   branch:
     - master
     - develop
+    - baker
 
 workspace:
   path: /drone/src
@@ -6417,6 +6418,7 @@ trigger:
   branch:
     - master
     - develop
+    - baker
 
 clone:
   disable: true
